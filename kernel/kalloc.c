@@ -14,6 +14,8 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+int ncnum = 0;
+
 struct run {
   struct run *next;
 };
@@ -53,6 +55,7 @@ kfree(void *pa)
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
+  ncnum++;
 
   r = (struct run*)pa;
 
@@ -76,7 +79,14 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
-  return (void*)r;
+    ncnum--;
+  }
+  return (void *)r;
+}
+
+uint64
+free_nc(){
+  return ncnum * PGSIZE;
 }
