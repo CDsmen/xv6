@@ -19,6 +19,8 @@ extern void forkret(void);
 static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
 
+extern char etext[]; // kernel.ld sets this to end of kernel code.
+
 extern char trampoline[]; // trampoline.S
 
 // initialize the proc table at boot time.
@@ -31,15 +33,6 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
 
-      // Allocate a page for the process's kernel stack.
-      // Map it high in memory, followed by an invalid
-      // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
   }
   kvminithart();
 }
@@ -71,6 +64,11 @@ myproc(void) {
   struct proc *p = c->proc;
   pop_off();
   return p;
+}
+
+pagetable_t my_k_pagetable(){
+  struct proc *p = myproc();
+  return p->k_pagetable;
 }
 
 int
@@ -120,6 +118,23 @@ found:
     release(&p->lock);
     return 0;
   }
+  // init kernel page table.
+  kvminit_u(&p->k_pagetable);
+  if (p->k_pagetable == 0)
+  {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  char *pa = kalloc();
+  if (pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int)(p - proc));
+  kvmmap_u(va, (uint64)pa, PGSIZE, PTE_R | PTE_W, p->k_pagetable);
+  p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -141,6 +156,8 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->k_pagetable)
+    k_proc_freepagetable(p->k_pagetable);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -195,17 +212,27 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmfree(pagetable, sz);
 }
 
+void k_proc_freepagetable(pagetable_t pagetable){
+  uvmunmap(pagetable, UART0, 1, 0);
+  uvmunmap(pagetable, VIRTIO0, 1, 0);
+  uvmunmap(pagetable, CLINT, 15, 0);
+  uvmunmap(pagetable, PLIC, 1024, 0);
+  uvmunmap(pagetable, KERNBASE, ((uint64)etext - KERNBASE)/PGSIZE, 0);
+  uvmunmap(pagetable, (uint64)etext, (PHYSTOP - (uint64)etext)/PGSIZE, 0);
+  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  freewalk(pagetable);
+}
+
 // a user program that calls exec("/init")
 // od -t xC initcode
 uchar initcode[] = {
-  0x17, 0x05, 0x00, 0x00, 0x13, 0x05, 0x45, 0x02,
-  0x97, 0x05, 0x00, 0x00, 0x93, 0x85, 0x35, 0x02,
-  0x93, 0x08, 0x70, 0x00, 0x73, 0x00, 0x00, 0x00,
-  0x93, 0x08, 0x20, 0x00, 0x73, 0x00, 0x00, 0x00,
-  0xef, 0xf0, 0x9f, 0xff, 0x2f, 0x69, 0x6e, 0x69,
-  0x74, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00
-};
+    0x17, 0x05, 0x00, 0x00, 0x13, 0x05, 0x45, 0x02,
+    0x97, 0x05, 0x00, 0x00, 0x93, 0x85, 0x35, 0x02,
+    0x93, 0x08, 0x70, 0x00, 0x73, 0x00, 0x00, 0x00,
+    0x93, 0x08, 0x20, 0x00, 0x73, 0x00, 0x00, 0x00,
+    0xef, 0xf0, 0x9f, 0xff, 0x2f, 0x69, 0x6e, 0x69,
+    0x74, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00};
 
 // Set up first user process.
 void
@@ -458,7 +485,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  
+
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
@@ -472,6 +499,7 @@ scheduler(void)
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
+        kvminithart_u(p->k_pagetable);
         c->proc = p;
         swtch(&c->context, &p->context);
 
@@ -485,6 +513,7 @@ scheduler(void)
     }
 #if !defined (LAB_FS)
     if(found == 0) {
+      kvminithart();
       intr_on();
       asm volatile("wfi");
     }

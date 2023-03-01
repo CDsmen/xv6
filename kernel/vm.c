@@ -56,6 +56,42 @@ kvminithart()
   sfence_vma();
 }
 
+void kvminit_u(pagetable_t *pagetable)
+{
+  *pagetable = (pagetable_t)kalloc();
+  memset(*pagetable, 0, PGSIZE);
+
+  // uart registers
+  kvmmap_u(UART0, UART0, PGSIZE, PTE_R | PTE_W, *pagetable);
+
+  // virtio mmio disk interface
+  kvmmap_u(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W, *pagetable);
+
+  // CLINT
+  kvmmap_u(CLINT, CLINT, 0x10000, PTE_R | PTE_W, *pagetable);
+
+  // PLIC
+  kvmmap_u(PLIC, PLIC, 0x400000, PTE_R | PTE_W, *pagetable);
+
+  // map kernel text executable and read-only.
+  kvmmap_u(KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X, *pagetable);
+
+  // map kernel data and the physical RAM we'll make use of.
+  kvmmap_u((uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W, *pagetable);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  kvmmap_u(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X, *pagetable);
+
+  // kvminithart_u(pagetable);
+}
+
+void kvminithart_u(pagetable_t pagetable)
+{
+  w_satp(MAKE_SATP(pagetable));
+  sfence_vma();
+}
+
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -121,6 +157,12 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
     panic("kvmmap");
 }
 
+void kvmmap_u(uint64 va, uint64 pa, uint64 sz, int perm, pagetable_t pagetable)
+{
+  if (mappages(pagetable, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
+
 // translate a kernel virtual address to
 // a physical address. only needed for
 // addresses on the stack.
@@ -131,9 +173,9 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
-  pte = walk(kernel_pagetable, va, 0);
-  if(pte == 0)
+  // pte = walk(kernel_pagetable, va, 0);
+  pte = walk(my_k_pagetable(), va, 0);
+  if (pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
     panic("kvmpa");
