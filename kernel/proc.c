@@ -23,9 +23,10 @@ extern char etext[]; // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+uint64 sta[NPROC];
+
 // initialize the proc table at boot time.
-void
-procinit(void)
+void procinit(void)
 {
   struct proc *p;
   
@@ -33,6 +34,13 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
 
+      char *pa = kalloc();
+      if (pa == 0)
+        panic("kalloc");
+      uint64 va = KSTACK((int)(p - proc));
+      sta[(int)(p - proc)] = (uint64)pa;
+      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      p->kstack = va;
   }
   kvminithart();
 }
@@ -129,13 +137,13 @@ found:
   // Allocate a page for the process's kernel stack.
   // Map it high in memory, followed by an invalid
   // guard page.
-  char *pa = kalloc();
-  if (pa == 0)
-    panic("kalloc");
-  uint64 va = KSTACK((int)(p - proc));
-  kvmmap_u(va, (uint64)pa, PGSIZE, PTE_R | PTE_W, p->k_pagetable);
-  p->kstack = va;
-
+  for (struct proc *p2 = proc; p2 < &proc[NPROC]; p2++)
+  {
+    uint64 va = KSTACK((int)(p2 - proc));
+    uint64 pa = sta[(int)(p2 - proc)];
+    // uint64 pa = (uint64)kalloc();
+    kvmmap_u(va, pa, PGSIZE, PTE_R | PTE_W, p->k_pagetable);
+  }
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -157,7 +165,7 @@ freeproc(struct proc *p)
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   if(p->k_pagetable)
-    k_proc_freepagetable(p->k_pagetable);
+    k_proc_freepagetable(p->k_pagetable,p->kstack);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -212,14 +220,23 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmfree(pagetable, sz);
 }
 
-void k_proc_freepagetable(pagetable_t pagetable){
+void k_proc_freepagetable(pagetable_t pagetable, uint64 kstack){
   uvmunmap(pagetable, UART0, 1, 0);
   uvmunmap(pagetable, VIRTIO0, 1, 0);
-  uvmunmap(pagetable, CLINT, 15, 0);
+  uvmunmap(pagetable, CLINT, 16, 0);
   uvmunmap(pagetable, PLIC, 1024, 0);
   uvmunmap(pagetable, KERNBASE, ((uint64)etext - KERNBASE)/PGSIZE, 0);
-  uvmunmap(pagetable, (uint64)etext, (PHYSTOP - (uint64)etext)/PGSIZE, 0);
+  uvmunmap(pagetable, (uint64)etext, ((uint64)PHYSTOP - (uint64)etext) / PGSIZE, 0);
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  // vmprint(pagetable);
+  // uvmunmap(pagetable, kstack, 1, 0);
+
+  for (struct proc *p2 = proc; p2 < &proc[NPROC]; p2++)
+  {
+    uint64 va = KSTACK((int)(p2 - proc));
+    uvmunmap(pagetable, va, 1, 0);
+  }
+
   freewalk(pagetable);
 }
 

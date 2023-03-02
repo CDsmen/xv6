@@ -108,7 +108,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
-void            k_proc_freepagetable(pagetable_t);
+void            k_proc_freepagetable(pagetable_t,uint64);
 pagetable_t     my_k_pagetable();
 
 // swtch.S
