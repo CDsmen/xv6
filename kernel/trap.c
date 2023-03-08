@@ -67,10 +67,16 @@ usertrap(void)
     syscall();
   } else if(r_scause() == 13 || r_scause() == 15){
     uint64 va = r_stval();
-    printf("IN,va = %p\n", va);
+    // printf("IN,va = %p\n", va);
     if (va > p->sz)
     {
       printf("va is too large\n");
+      p->killed = 1;
+    }
+    else if (va <= p->trapframe->sp)
+    {
+      printf("va is low then sp\n");
+      printf("va= %p, sp= %p\n", va, p->trapframe->sp);
       p->killed = 1;
     }
     else
