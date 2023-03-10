@@ -68,15 +68,15 @@ usertrap(void)
   } else if(r_scause() == 13 || r_scause() == 15){
     uint64 va = r_stval();
     // printf("IN,va = %p\n", va);
-    if (va > p->sz)
+    if (va >= p->sz)
     {
-      printf("va is too large\n");
+      // printf("va is too large\n");
       p->killed = 1;
     }
     else if (va <= p->trapframe->sp)
     {
-      printf("va is low then sp\n");
-      printf("va= %p, sp= %p\n", va, p->trapframe->sp);
+      // printf("va is low then sp\n");
+      // printf("va= %p, sp= %p\n", va, p->trapframe->sp);
       p->killed = 1;
     }
     else
@@ -86,15 +86,17 @@ usertrap(void)
       mem = kalloc();
       if (mem == 0)
       {
-        printf("men is not enough\n");
+        // printf("men is not enough\n");
         p->killed = 1;
-      }
-      memset(mem, 0, PGSIZE);
-      if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W | PTE_X | PTE_R | PTE_U) != 0)
-      {
-        kfree(mem);
-        printf("map error\n");
-        p->killed = 1;
+      }else{
+        memset(mem, 0, PGSIZE);
+        // printf("ava= %p\n", va);
+        if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W | PTE_X | PTE_R | PTE_U) != 0)
+        {
+          kfree(mem);
+          printf("map error\n");
+          p->killed = 1;
+        }
       }
     }
   }
