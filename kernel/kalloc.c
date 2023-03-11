@@ -23,6 +23,8 @@ struct {
   struct run *freelist;
 } kmem;
 
+uint8 pa_cnt[560000]={0};
+
 void
 kinit()
 {
@@ -51,15 +53,22 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  if (pa_cnt[(uint64)pa >> 12] == 0 || --pa_cnt[(uint64)pa >> 12] == 0)
+  {
+    // Fill with junk to catch dangling refs.
+    memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+    r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    release(&kmem.lock);
+  }
+  // else{
+  //   printf("indx = %d, cnt=%d\n", (uint64)pa >> 12, pa_cnt[(uint64)pa >> 12]);
+  //   panic("pa_cnt too much\n");
+  // }
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -76,7 +85,39 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
+  if(r){
+    if (pa_cnt[(uint64)r >> 12]!=0)
+      panic("pa_cnt not zero\n");
+    memset((char *)r, 5, PGSIZE); // fill with junk
+    pa_cnt[(uint64)r >> 12]=1;
+  }
   return (void*)r;
+}
+
+void *
+kaddcnt(void *pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kaddcnt");
+
+  if (pa_cnt[(uint64)pa >> 12] == 0)
+  {
+    panic("pa not exist\n");
+  }
+  else
+  {
+    pa_cnt[(uint64)pa >> 12]++;
+    if (pa_cnt[(uint64)pa >> 12]>63){
+      printf("\n\n\nNB!\n\n\n");
+    }
+  }
+  return pa;
+}
+uint8
+kgetcnt(void *pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kgetcnt");
+
+  return pa_cnt[(uint64)pa >> 12];
 }
