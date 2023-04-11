@@ -2,6 +2,7 @@ struct buf {
   int valid;   // has data been read from disk?
   int disk;    // does disk "own" buf?
   uint dev;
+  uint tick;
   uint blockno;
   struct sleeplock lock;
   uint refcnt;
