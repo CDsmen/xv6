@@ -165,6 +165,30 @@ bad:
   return -1;
 }
 
+static struct inode *
+create(char *path, short type, short major, short minor);
+
+uint64
+sys_symlink(void)
+{
+  char new[MAXPATH], old[MAXPATH];
+  struct inode *ip;
+
+  if (argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  ip = create(new, T_SYMLINK, 0, 0);
+  if(ip==0){
+    end_op();
+    return -1;
+  }
+  strncpy(ip->nxt, old, MAXPATH);
+  iunlockput(ip);
+  end_op();
+  return 0;
+}
+
 // Is the directory dp empty except for "." and ".." ?
 static int
 isdirempty(struct inode *dp)
@@ -303,7 +327,10 @@ sys_open(void)
       end_op();
       return -1;
     }
-  } else {
+  }
+  
+  else
+  {
     if((ip = namei(path)) == 0){
       end_op();
       return -1;
@@ -320,6 +347,26 @@ sys_open(void)
     iunlockput(ip);
     end_op();
     return -1;
+  }
+  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW))
+  {
+    int cnt = 0;
+    while(ip->type == T_SYMLINK)
+    {
+      strncpy(path, ip->nxt, MAXPATH);
+      iunlockput(ip);
+      if ((ip = namei(path)) == 0)
+      {
+        end_op();
+        return -1;
+      }
+      cnt++;
+      if (cnt > 10){
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+    }
   }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
